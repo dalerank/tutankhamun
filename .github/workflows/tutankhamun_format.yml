@@ -1,0 +1,44 @@
+name: Tutankhamun Format
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# The lines a push or a pull request changes in the sources, compared with .clang-format (CODE_STYLE.md); the lines it
+# does not touch are not checked. Advisory: a difference is shown as a warning and the run stays green. clang-format is
+# the version of Visual Studio 2022's LLVM (19.1.5), so a local `git clang-format` gives the same answer.
+jobs:
+  format:
+    name: clang-format of the changed lines
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: install clang-format
+      run: pip install clang-format==19.1.5
+    - name: check the changed lines
+      shell: bash
+      env:
+        BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+      run: |
+        if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+          echo "no base commit to compare with: nothing to check"
+          exit 0
+        fi
+        base=$(git merge-base "$BASE" HEAD)
+        diff=$(git clang-format --binary "$(command -v clang-format)" --extensions c,h --diff "$base" HEAD -- \
+          src/game src/app src/platform || true)
+        case "$diff" in
+          ""|"no modified files to format"|"clang-format did not modify any files")
+            echo "the changed lines are formatted" ;;
+          *)
+            echo "$diff"
+            echo "::warning::the changed lines differ from .clang-format: git clang-format formats them" ;;
+        esac
