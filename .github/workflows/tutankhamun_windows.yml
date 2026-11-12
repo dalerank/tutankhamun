@@ -39,6 +39,10 @@ jobs:
       run: cmake --build --preset ${{ matrix.preset }}
     - name: install
       run: cmake --install out/build/${{ matrix.preset }} --config Release --prefix ${{ matrix.artifact }}
+    # the configs read into this build's tables (32-bit MSVC lays them out its own way), compared with the built-in ones
+    - name: check the configs
+      shell: bash
+      run: ${{ matrix.artifact }}/tutankhamun.exe --check-configs config
     - uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.artifact }}
