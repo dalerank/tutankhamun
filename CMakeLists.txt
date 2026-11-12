@@ -131,8 +131,22 @@ set(TUTANKHAMUN_SOURCES
     src/platform/report.c
     src/platform/updater.c
     src/platform/version.c
-    ${GAME_SOURCES}
 )
+
+# a call that does not match its prototype, or a call without one, is an error (the game and the program)
+if(MSVC)
+    set(TUTANKHAMUN_STRICT_CALLS /we4113 /we4028 /we4047 /we4024 /we4133 /we4020 /we4029 /we4021 /we4013)
+else()
+    set(TUTANKHAMUN_STRICT_CALLS -Werror=implicit-function-declaration -Werror=int-conversion -Werror=incompatible-pointer-types
+        -Werror=return-type -Werror=pointer-to-int-cast -Werror=int-to-pointer-cast)
+endif()
+
+# The game (src/game) as a library of its own, linked into the program: it calls the platform layer, parson and the
+# functions the program defines for it (the play mode's messages, the log, the files).
+add_library(tutankhamun_game STATIC ${GAME_SOURCES})
+target_include_directories(tutankhamun_game PUBLIC src src/game)
+target_compile_options(tutankhamun_game PRIVATE ${TUTANKHAMUN_STRICT_CALLS})
+target_link_libraries(tutankhamun_game PUBLIC parson tutankhamun_platform)
 
 # The build's version (src/platform/version.c, the front menu): 0.1.<the number of commits>, the commit and the day,
 # read at configure time as in Akhenaten; the CI checks out the whole history for the count.
@@ -209,21 +223,16 @@ else()
     add_executable(tutankhamun ${TUTANKHAMUN_SOURCES})
 endif()
 target_include_directories(tutankhamun PRIVATE src src/game)
-# a call that does not match its prototype, or a call without one, is an error
+target_compile_options(tutankhamun PRIVATE ${TUTANKHAMUN_STRICT_CALLS})
 if(MSVC)
-    target_compile_options(tutankhamun PRIVATE /we4113 /we4028 /we4047 /we4024 /we4133 /we4020 /we4029 /we4021 /we4013)
     target_link_options(tutankhamun PRIVATE /DYNAMICBASE /INCREMENTAL:NO)
     target_link_libraries(tutankhamun PRIVATE winmm winhttp)
-else()
-    target_compile_options(tutankhamun PRIVATE -Werror=implicit-function-declaration -Werror=int-conversion -Werror=incompatible-pointer-types
-        -Werror=return-type -Werror=pointer-to-int-cast -Werror=int-to-pointer-cast)
-    if(NOT ANDROID AND NOT APPLE)
-        # the C++ run time of the Bink decoder is linked in: the program needs only the system's C library
-        target_link_options(tutankhamun PRIVATE -static-libstdc++ -static-libgcc -rdynamic)
-    endif()
+elseif(NOT ANDROID AND NOT APPLE)
+    # the C++ run time of the Bink decoder is linked in: the program needs only the system's C library
+    target_link_options(tutankhamun PRIVATE -static-libstdc++ -static-libgcc -rdynamic)
 endif()
 target_compile_definitions(tutankhamun PRIVATE SDL_MAIN_HANDLED)
-target_link_libraries(tutankhamun PRIVATE parson tutankhamun_platform akhenaten_bink)
+target_link_libraries(tutankhamun PRIVATE tutankhamun_game parson tutankhamun_platform akhenaten_bink)
 
 if(ANDROID)
     # the configs go into the APK's assets (android/app/build.gradle) and are copied to the app's storage at start
