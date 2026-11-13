@@ -63,3 +63,43 @@ jobs:
         gh release view nightly >/dev/null 2>&1 || gh release create nightly --prerelease --target main \
           --title "Nightly" --notes "The newest build of main, read by the program's own update." || true
         gh release upload nightly web_build.zip --clobber
+
+  # The repository's GitHub Pages, as Akhenaten publishes its own (akhenaten_emscripten.yml): the game at
+  # https://dalerank.github.io/<repository>/play/ and the site's root leading there. Settings > Pages takes its source
+  # from GitHub Actions.
+  pages:
+    name: publish to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: web
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}play/
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        name: web_build
+        path: site/play
+    - name: the site's root
+      run: |
+        cat > site/index.html <<'EOF'
+        <!doctype html>
+        <meta charset="utf-8">
+        <title>Tutankhamun</title>
+        <meta http-equiv="refresh" content="0; url=play/">
+        <a href="play/">Tutankhamun in the browser</a>
+        EOF
+    - uses: actions/configure-pages@v5
+    - uses: actions/upload-pages-artifact@v3
+      with:
+        path: site
+    - name: deploy
+      id: deployment
+      uses: actions/deploy-pages@v4

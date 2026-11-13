@@ -88,7 +88,7 @@ ports, the configs are built into the program, and there is no Discord presence.
 `tutankhamun.html`. The page (`res/web/shell.html`) asks once for the folder of the player's own game; its files are
 copied into the browser's IndexedDB, and the saves and `tutankhamun.ini` are written back there while the game runs.
 The CI (`.github/workflows/tutankhamun_web.yml`) puts `web_build.zip` (`index.html`, `.js`, `.wasm`) in the release
-`nightly`.
+`nightly` and publishes the page on the repository's GitHub Pages, in `play/`.
 
 ## Checking the configs
 
