@@ -1,0 +1,65 @@
+name: Tutankhamun Build Web
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+# the release nightly is written by the push builds of main
+permissions:
+  contents: write
+
+# two pushes in a row: the second one's files are uploaded after the first one's
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+env:
+  EMSDK_VERSION: 4.0.1
+
+jobs:
+  web:
+    name: build for the browser (Emscripten)
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 # the commit count is the build number (CMakeLists.txt)
+    # Emscripten's SDK as Julius gets it (.ci_scripts/setup_environment.sh), at the version the build is made with
+    - name: install Emscripten
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends ninja-build
+        git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+        "$RUNNER_TEMP/emsdk/emsdk" install $EMSDK_VERSION
+        "$RUNNER_TEMP/emsdk/emsdk" activate $EMSDK_VERSION
+    # Emscripten's ports (SDL2, SDL2_mixer, mpg123) are built into its cache once per SDK version
+    - uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/emsdk/upstream/emscripten/cache
+        key: emscripten-cache-${{ env.EMSDK_VERSION }}
+    - name: build
+      run: |
+        source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
+        emcmake cmake -S . -B build/web -G Ninja -DCMAKE_BUILD_TYPE=Release
+        cmake --build build/web
+    # the page and its two files, to be served over http(s) as they are (a file:// page cannot load the .wasm)
+    - name: package
+      run: |
+        mkdir web_build
+        cp build/web/bin/tutankhamun.html web_build/index.html
+        cp build/web/bin/tutankhamun.js build/web/bin/tutankhamun.wasm web_build/
+        (cd web_build && zip -9 ../web_build.zip index.html tutankhamun.js tutankhamun.wasm)
+    - uses: actions/upload-artifact@v4
+      with:
+        name: web_build
+        path: web_build
+    - name: publish to the release nightly
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh release view nightly >/dev/null 2>&1 || gh release create nightly --prerelease --target main \
+          --title "Nightly" --notes "The newest build of main, read by the program's own update." || true
+        gh release upload nightly web_build.zip --clobber
