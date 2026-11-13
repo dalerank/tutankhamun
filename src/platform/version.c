@@ -23,6 +23,8 @@
 #define VERSION_SYSTEM "macOS arm64"
 #elif defined(__APPLE__)
 #define VERSION_SYSTEM "macOS x64"
+#elif defined(__EMSCRIPTEN__)
+#define VERSION_SYSTEM "Web"
 #else
 #define VERSION_SYSTEM "Linux"
 #endif

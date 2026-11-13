@@ -1,7 +1,7 @@
 // tutankhamun's run time on Linux and the other POSIX systems: the game's static initializers run, and a crash (a
 // fatal signal) is logged with its address and the return addresses of the stack, relative to the program's image,
 // before the program ends with the fault's exit code (3). Android has no backtrace before API 33: there the fault
-// alone is logged.
+// alone is logged. In the browser (Emscripten) there is no crash handler: the console shows the trap and its stack.
 
 #define _GNU_SOURCE
 
@@ -10,7 +10,7 @@
 #include "platform/log.h"
 
 #include <dlfcn.h>
-#if !defined(__ANDROID__)
+#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
 #include <execinfo.h>
 #endif
 #include <signal.h>
@@ -19,6 +19,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#if !defined(__EMSCRIPTEN__)
 enum port_crash {
     PORT_CRASH_FRAMES = 48,
     PORT_CRASH_EXIT_CODE = 3,
@@ -91,6 +92,12 @@ static void crash_handler_install(void)
         sigaction(fatal[i], &action, NULL);
     }
 }
+#else
+// in the browser a fault is a WebAssembly trap, not a signal: the page's console shows it with the stack
+static void crash_handler_install(void)
+{
+}
+#endif
 
 void image_run_static_initializers(void)
 {

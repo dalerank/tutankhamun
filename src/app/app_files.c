@@ -4,6 +4,8 @@
 // ../share/tutankhamun/config or, in the macOS app bundle, in Contents/Resources/config, the ini in the user's folder
 // (~/.config/tutankhamun; macOS: ~/Library/Application Support/tutankhamun; on Android both in the app's internal
 // storage), read and written here ([section] lines and key=value lines; a write keeps the other lines as they are).
+// In the browser the program is /app/tutankhamun with the configs built in beside it, the user's folder is in
+// Emscripten's $HOME (/home/web_user), which the page keeps in IndexedDB.
 
 #include "app/app_files.h"
 
@@ -113,6 +115,13 @@ bool app_program_path(char *path, size_t size)
         return false;
     }
     strcpy(path, resolved);
+    return true;
+}
+#elif defined(__EMSCRIPTEN__)
+// the browser has no program file: the program is /app/tutankhamun, beside the built-in /app/config (CMakeLists.txt)
+bool app_program_path(char *path, size_t size)
+{
+    snprintf(path, size, "/app/tutankhamun");
     return true;
 }
 #else

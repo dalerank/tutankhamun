@@ -9,7 +9,8 @@ project(tutankhamun C CXX)
 # decoder for the videos and parson for the JSON configs. Windows (MSVC, Win32 or x64), Linux (GCC or Clang, 64-bit;
 # the AppImage: packaging/linux), macOS (Apple Clang; the app bundle Tutankhamun.app for one architecture,
 # -DCMAKE_OSX_ARCHITECTURES=arm64 or x86_64, as Akhenaten builds; the disk image: packaging/macos) and Android (the
-# NDK through the Gradle project in android/: the game is libmain.so beside a shared SDL2 and SDL2_mixer).
+# NDK through the Gradle project in android/: the game is libmain.so beside a shared SDL2 and SDL2_mixer) and the
+# browser (Emscripten: emcmake cmake; tutankhamun.html, .js and .wasm with Emscripten's SDL2 ports).
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release)
 endif()
@@ -43,7 +44,12 @@ add_library(tutankhamun_platform STATIC EXCLUDE_FROM_ALL
 )
 target_include_directories(tutankhamun_platform PUBLIC src PRIVATE src/game)
 
-if(ANDROID)
+if(EMSCRIPTEN)
+    # the browser: SDL2 and SDL2_mixer are Emscripten's own ports (as in Julius), WAV and MP3 as on the other systems
+    set(TUTANKHAMUN_EMSCRIPTEN_SDL "SHELL:-sUSE_SDL=2" "SHELL:-sUSE_SDL_MIXER=2" "SHELL:-sSDL2_MIXER_FORMATS=[\"mp3\"]")
+    target_compile_options(tutankhamun_platform PUBLIC ${TUTANKHAMUN_EMSCRIPTEN_SDL})
+    target_link_options(tutankhamun_platform PUBLIC ${TUTANKHAMUN_EMSCRIPTEN_SDL})
+elseif(ANDROID)
     include(${CMAKE_SOURCE_DIR}/cmake/TutankhamunAndroidSDL.cmake)
     if(NOT TUTANKHAMUN_SDL_READY)
         message(FATAL_ERROR "SDL2 / SDL2_mixer did not become ready")
@@ -107,6 +113,12 @@ elseif(ANDROID)
 else()
     set(TUTANKHAMUN_SYSTEM_SOURCES src/app/port_posix.c src/platform/platform_posix.c)
 endif()
+# Discord's presence talks to the Discord client over a local pipe: a browser has none
+if(EMSCRIPTEN)
+    set(TUTANKHAMUN_DISCORD_SOURCE src/platform/discord_rpc_none.c)
+else()
+    set(TUTANKHAMUN_DISCORD_SOURCE src/platform/discord_rpc.c)
+endif()
 
 set(TUTANKHAMUN_SOURCES
     ${TUTANKHAMUN_SYSTEM_SOURCES}
@@ -122,7 +134,7 @@ set(TUTANKHAMUN_SOURCES
     src/app/startup.c
     src/app/video_bink.c
     src/platform/cursor.c
-    src/platform/discord_rpc.c
+    ${TUTANKHAMUN_DISCORD_SOURCE}
     src/platform/log.c
     src/platform/platform_display.c
     src/platform/platform_file.c
@@ -227,6 +239,26 @@ target_compile_options(tutankhamun PRIVATE ${TUTANKHAMUN_STRICT_CALLS})
 if(MSVC)
     target_link_options(tutankhamun PRIVATE /DYNAMICBASE /INCREMENTAL:NO)
     target_link_libraries(tutankhamun PRIVATE winmm winhttp)
+elseif(EMSCRIPTEN)
+    # The browser build (res/web/shell.html: the game folder the user picks is copied into IndexedDB): tutankhamun.html,
+    # .js and .wasm. The game's own loops (the frames, the message box, the videos) stay as they are: ASYNCIFY lets
+    # them give the browser its turn (play.c waits for the next animation frame, SDL_Delay sleeps). main is called by
+    # the page with the game folder; the gameplay configs are built in at /app/config (app_files.c).
+    set_target_properties(tutankhamun PROPERTIES SUFFIX ".html")
+    target_link_options(tutankhamun PRIVATE
+        "SHELL:-sASYNCIFY=1"
+        "SHELL:-sASYNCIFY_STACK_SIZE=1048576"
+        "SHELL:-sSTACK_SIZE=8388608"
+        "SHELL:-sINITIAL_MEMORY=268435456"
+        "SHELL:-sALLOW_MEMORY_GROWTH=1"
+        "SHELL:-sFORCE_FILESYSTEM=1"
+        "SHELL:-sINVOKE_RUN=0"
+        "SHELL:-sEXIT_RUNTIME=1"
+        "SHELL:-sEXPORTED_RUNTIME_METHODS=[\"callMain\",\"FS\"]"
+        -lidbfs.js
+        "SHELL:--shell-file ${CMAKE_SOURCE_DIR}/res/web/shell.html"
+        "SHELL:--embed-file ${CMAKE_SOURCE_DIR}/config@/app/config")
+    set_property(TARGET tutankhamun APPEND PROPERTY LINK_DEPENDS "${CMAKE_SOURCE_DIR}/res/web/shell.html")
 elseif(NOT ANDROID AND NOT APPLE)
     # the C++ run time of the Bink decoder is linked in: the program needs only the system's C library
     target_link_options(tutankhamun PRIVATE -static-libstdc++ -static-libgcc -rdynamic)
@@ -240,6 +272,11 @@ if(ANDROID)
 endif()
 
 set_target_properties(tutankhamun PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
+if(EMSCRIPTEN)
+    # the configs are in the program (--embed-file above); bin/ holds the page to serve
+    return()
+endif()
 
 # The gameplay configs (config/*.json) are copied beside the program on every build (macOS: into the bundle's
 # Contents/Resources).

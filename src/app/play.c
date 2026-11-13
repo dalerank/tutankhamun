@@ -52,12 +52,34 @@
 #include <mmsystem.h>
 #include <intrin.h>
 #endif
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#endif
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "SDL.h"
+
+#if defined(__EMSCRIPTEN__)
+// In the browser a frame ends by giving the page its turn until the next animation frame (ASYNCIFY unwinds the game's
+// loop and comes back into it): the canvas is shown, the events come in, and the frames keep the display's pace as
+// the vsync of the other systems does. A hidden tab gets no animation frames: a timer of a quarter second goes on then.
+EM_ASYNC_JS(void, browser_next_frame, (void), {
+    await new Promise(function(resolve) {
+        var done = false;
+        var finish = function() {
+            if (!done) {
+                done = true;
+                resolve();
+            }
+        };
+        requestAnimationFrame(finish);
+        setTimeout(finish, 250);
+    });
+});
+#endif
 #if defined(_WIN32)
 #include "SDL_syswm.h"
 #endif
@@ -280,6 +302,8 @@ static bool play_message_peek(platform_message *msg, uint32_t first, uint32_t la
 {
 #if defined(_MSC_VER)
     void *caller = _ReturnAddress();
+#elif defined(__EMSCRIPTEN__)
+    void *caller = 0; // WebAssembly has no return addresses to read (the log line alone tells of the peek)
 #else
     void *caller = __builtin_return_address(0);
 #endif
@@ -933,6 +957,9 @@ static void frame_end(void)
 {
     platform_screen_update();
     platform_screen_render();
+#if defined(__EMSCRIPTEN__)
+    browser_next_frame();
+#endif
     if (game_quit_request == 1) {
         play.quit = 1;
     }

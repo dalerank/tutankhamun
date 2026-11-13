@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tutankhamun</title>
+<!--
+  The page of the browser build (CMakeLists.txt, --shell-file): the player picks or drops the folder of their own
+  Pharaoh (+ Cleopatra) once, its files are copied into the browser (IndexedDB, Emscripten's IDBFS at /game) and the
+  game starts from there; the user's folder of the program (/home/web_user: tutankhamun.ini, the log) is kept the same
+  way. What the game writes (saves, the ini) is written back to IndexedDB every few seconds, when the tab is hidden and
+  when the game ends. After Julius' shell (https://github.com/bvschaik/julius, gen/shell.html.in).
+-->
+<style>
+  :root { --bg: #14100b; --panel: #2a2117; --text: #e8dcc4; --muted: #a8977a; --accent: #d9a441; --danger: #d0604a; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
+  canvas { position: absolute; inset: 0; margin: auto; display: block; max-width: 100%; max-height: 100%; border: 0; outline: none; background: #000; }
+  #panel { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 2; background: var(--bg); }
+  #box { max-width: 560px; width: 100%; background: var(--panel); border: 1px solid #4a3b28; border-radius: 12px; padding: 28px; text-align: center; box-sizing: border-box; }
+  #box.drag { border: 2px dashed var(--accent); }
+  h1 { margin: 0 0 4px; font-size: 28px; letter-spacing: 0.04em; color: var(--accent); }
+  .sub { color: var(--muted); margin-bottom: 20px; }
+  #status { min-height: 3em; }
+  progress { width: 100%; height: 10px; display: none; margin-top: 10px; accent-color: var(--accent); }
+  button { font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid #6b5636; background: #3a2e1f; color: var(--text); padding: 10px 18px; margin: 6px; }
+  button:hover { background: #4a3b28; }
+  button.primary { background: var(--accent); color: #1a140c; border-color: var(--accent); font-weight: 600; padding: 14px 32px; font-size: 17px; }
+  button.danger { border-color: var(--danger); color: var(--danger); background: transparent; }
+  .hidden { display: none !important; }
+  #saves a { display: block; color: var(--accent); }
+  #osd { position: fixed; top: 8px; right: 8px; z-index: 3; font-size: 12px; color: var(--muted); background: rgba(0,0,0,0.6); padding: 4px 8px; border-radius: 6px; display: none; }
+  .version { margin-top: 18px; font-size: 12px; color: var(--muted); }
+  input[type=file] { display: none; }
+</style>
+</head>
+<body>
+<div id="panel">
+  <div id="box">
+    <h1>Tutankhamun</h1>
+    <div class="sub">Pharaoh + Cleopatra in the browser</div>
+    <div id="status">Loading the game&hellip;</div>
+    <progress id="progress"></progress>
+    <div id="pick" class="hidden">
+      <button class="primary" id="pickButton">Choose the game folder</button>
+      <div class="sub" style="margin-top:8px">or drop it here: the folder that holds <b>Data</b> (Pharaoh + Cleopatra, e.g. from GOG or Steam).
+        Its files stay in this browser.</div>
+    </div>
+    <div id="start" class="hidden">
+      <button class="primary" id="playButton">Play</button><br>
+      <button id="savesButton">Saves</button>
+      <button id="replaceButton">Choose another folder</button>
+      <button class="danger" id="clearButton">Delete all files</button>
+    </div>
+    <div id="saves" class="hidden"></div>
+    <div id="confirm" class="hidden">
+      <div>Delete the game files and all saves from this browser?</div>
+      <button class="danger" id="confirmYes">Delete</button>
+      <button id="confirmNo">Keep</button>
+    </div>
+  </div>
+</div>
+<div id="osd"></div>
+<input type="file" id="folder" webkitdirectory multiple>
+<canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+<script>
+  var GAME_DIR = '/game';
+  var USER_DIR = '/home/web_user';
+  var SYNC_MS = 5000;
+  // the files of a game folder the game never reads: programs, manuals, archives, screenshots (the .txt files stay:
+  // the game reads its models and texts from them)
+  var SKIPPED = /\.(pdf|exe|dll|ico|zip|png|m3d|asi|tsk)$/i;
+
+  var el = function(id) { return document.getElementById(id); };
+  var parts = ['pick', 'start', 'saves', 'confirm'];
+  function show(part) {
+    parts.forEach(function(p) { el(p).classList.toggle('hidden', p !== part); });
+  }
+  function status(text, done, total) {
+    el('status').innerHTML = text;
+    var bar = el('progress');
+    if (total) {
+      bar.style.display = 'block';
+      bar.max = total;
+      bar.value = done;
+    } else {
+      bar.style.display = 'none';
+    }
+  }
+  function osd(text) {
+    el('osd').textContent = text || '';
+    el('osd').style.display = text ? 'block' : 'none';
+  }
+
+  function mkdirs(path) {
+    var at = '';
+    path.split('/').forEach(function(part) {
+      if (!part) return;
+      at += '/' + part;
+      try { FS.mkdir(at); } catch (e) { /* there already */ }
+    });
+  }
+  function clearDir(path) {
+    var node;
+    try { node = FS.lookupPath(path).node; } catch (e) { return; }
+    Object.keys(node.contents).forEach(function(name) {
+      var child = path + '/' + name;
+      if (FS.isDir(FS.stat(child).mode)) {
+        clearDir(child);
+        FS.rmdir(child);
+      } else {
+        FS.unlink(child);
+      }
+    });
+  }
+  function hasGame() {
+    try {
+      return Object.keys(FS.lookupPath(GAME_DIR).node.contents).some(function(name) { return name.toLowerCase() === 'data'; });
+    } catch (e) {
+      return false;
+    }
+  }
+
+  var syncing = false, syncAgain = false;
+  function sync(done) {
+    if (syncing) {
+      syncAgain = true;
+      if (done) setTimeout(function() { sync(done); }, 200);
+      return;
+    }
+    syncing = true;
+    FS.syncfs(false, function(err) {
+      syncing = false;
+      if (err) console.error('syncfs', err);
+      if (syncAgain) {
+        syncAgain = false;
+        sync(done);
+      } else if (done) {
+        done(err);
+      }
+    });
+  }
+
+  // the picked or dropped files: [{file, path}] with the path inside the game folder
+  function importFiles(entries) {
+    entries = entries.filter(function(e) { return !SKIPPED.test(e.path); });
+    if (!entries.some(function(e) { return /^data\//i.test(e.path); })) {
+      status('That folder has no <b>Data</b> folder: choose the folder of the game itself.');
+      show('pick');
+      return;
+    }
+    clearDir(GAME_DIR);
+    var total = entries.reduce(function(sum, e) { return sum + e.file.size; }, 0), done = 0, index = 0;
+    var mb = function(bytes) { return (bytes / 1048576).toFixed(0); };
+    show(null);
+    (function next() {
+      if (index === entries.length) {
+        status('Saving the files in the browser&hellip;');
+        sync(function(err) {
+          if (err) {
+            status('The browser did not keep the files: ' + err + '<br>There may not be enough room for them.');
+            show('pick');
+            return;
+          }
+          ready();
+        });
+        return;
+      }
+      var entry = entries[index++];
+      entry.file.arrayBuffer().then(function(buffer) {
+        var slash = entry.path.lastIndexOf('/');
+        if (slash > 0) mkdirs(GAME_DIR + '/' + entry.path.substring(0, slash));
+        FS.writeFile(GAME_DIR + '/' + entry.path, new Uint8Array(buffer));
+        done += entry.file.size;
+        status('Copying the game files&hellip; ' + mb(done) + ' / ' + mb(total) + ' MB', done, total);
+        next();
+      }, function(err) {
+        status('Could not read ' + entry.path + ': ' + err);
+        show('pick');
+      });
+    })();
+  }
+
+  el('folder').addEventListener('change', function(event) {
+    var files = Array.prototype.slice.call(event.target.files);
+    importFiles(files.map(function(file) {
+      var path = file.webkitRelativePath || file.name;
+      return { file: file, path: path.substring(path.indexOf('/') + 1) };
+    }));
+    event.target.value = '';
+  });
+
+  function readEntry(entry, path, list) {
+    return new Promise(function(resolve, reject) {
+      if (entry.isFile) {
+        entry.file(function(file) { list.push({ file: file, path: path + entry.name }); resolve(); }, reject);
+        return;
+      }
+      var reader = entry.createReader(), all = [];
+      (function read() {
+        reader.readEntries(function(batch) {
+          if (!batch.length) {
+            Promise.all(all.map(function(child) { return readEntry(child, path + entry.name + '/', list); })).then(resolve, reject);
+            return;
+          }
+          all = all.concat(Array.prototype.slice.call(batch));
+          read();
+        }, reject);
+      })();
+    });
+  }
+
+  var box = el('box');
+  box.addEventListener('dragover', function(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; box.classList.add('drag'); });
+  box.addEventListener('dragleave', function() { box.classList.remove('drag'); });
+  box.addEventListener('drop', function(e) {
+    e.preventDefault();
+    box.classList.remove('drag');
+    if (Module.running || el('pick').classList.contains('hidden') && el('start').classList.contains('hidden')) return;
+    var item = e.dataTransfer.items && e.dataTransfer.items[0];
+    var root = item && item.webkitGetAsEntry && item.webkitGetAsEntry();
+    if (!root || !root.isDirectory) {
+      status('Drop the game folder itself.');
+      return;
+    }
+    status('Reading the folder&hellip;');
+    var list = [];
+    readEntry(root, '', list).then(function() {
+      importFiles(list.map(function(e) { return { file: e.file, path: e.path.substring(e.path.indexOf('/') + 1) }; }));
+    }, function(err) {
+      status('Could not read the folder: ' + err);
+    });
+  });
+
+  function listSaves(dir, out) {
+    var node;
+    try { node = FS.lookupPath(dir).node; } catch (e) { return out; }
+    Object.keys(node.contents).forEach(function(name) {
+      var path = dir + '/' + name;
+      if (FS.isDir(FS.stat(path).mode)) {
+        listSaves(path, out);
+      } else if (/\.(sav|pak)$/i.test(name)) {
+        out.push(path);
+      }
+    });
+    return out;
+  }
+  function showSaves() {
+    var saves = listSaves(GAME_DIR + '/Save', []).concat(listSaves(GAME_DIR + '/save', []));
+    var html = saves.length ? '' : '<div>No saves yet.</div>';
+    saves.forEach(function(path, i) {
+      html += '<a href="#" data-i="' + i + '">' + path.substring(GAME_DIR.length + 1) + '</a>';
+    });
+    html += '<button id="savesBack">Back</button>';
+    el('saves').innerHTML = html;
+    el('saves').querySelectorAll('a').forEach(function(a) {
+      a.addEventListener('click', function(e) {
+        e.preventDefault();
+        var path = saves[+a.dataset.i];
+        var url = URL.createObjectURL(new Blob([FS.readFile(path)]));
+        var link = document.createElement('a');
+        link.href = url;
+        link.download = path.substring(path.lastIndexOf('/') + 1);
+        link.click();
+        setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+      });
+    });
+    el('savesBack').addEventListener('click', ready);
+    status('Click a save to download it.');
+    show('saves');
+  }
+
+  function ready() {
+    status('The game files are in this browser.');
+    show('start');
+  }
+
+  el('pickButton').addEventListener('click', function() { el('folder').click(); });
+  el('replaceButton').addEventListener('click', function() { el('folder').click(); });
+  el('savesButton').addEventListener('click', showSaves);
+  el('clearButton').addEventListener('click', function() { status(''); show('confirm'); });
+  el('confirmNo').addEventListener('click', ready);
+  el('confirmYes').addEventListener('click', function() {
+    status('Deleting&hellip;');
+    show(null);
+    clearDir(GAME_DIR);
+    sync(function() {
+      status('Deleted. Choose the game folder to play again.');
+      show('pick');
+    });
+  });
+  el('playButton').addEventListener('click', function() {
+    if (Module.running) return;
+    Module.running = true;
+    el('panel').style.display = 'none';
+    el('canvas').focus();
+    Module.syncTimer = setInterval(function() { sync(); }, SYNC_MS);
+    Module.callMain([GAME_DIR]);
+  });
+  document.addEventListener('visibilitychange', function() {
+    if (document.hidden && Module.running) sync();
+  });
+  window.addEventListener('pagehide', function() { if (Module.running) sync(); });
+
+  var Module = {
+    running: false,
+    canvas: el('canvas'),
+    print: function(text) { console.log(text); },
+    printErr: function(text) { console.error(text); },
+    setStatus: function(text) { if (text && !Module.running) status(text); },
+    onRuntimeInitialized: function() {
+      status('Opening the browser&rsquo;s storage&hellip;');
+      try {
+        FS.mkdir(GAME_DIR);
+        FS.mount(IDBFS, {}, GAME_DIR);
+        FS.mount(IDBFS, {}, USER_DIR);
+      } catch (e) {
+        status('The browser&rsquo;s storage is not available: ' + e);
+        return;
+      }
+      FS.syncfs(true, function(err) {
+        if (err) {
+          status('The browser&rsquo;s storage is not available: ' + err);
+          return;
+        }
+        if (hasGame()) {
+          ready();
+        } else {
+          status('Choose the folder of your Pharaoh (+ Cleopatra) game.');
+          show('pick');
+        }
+      });
+    },
+    onExit: function(code) {
+      clearInterval(Module.syncTimer);
+      Module.running = false;
+      osd('Saving…');
+      sync(function() {
+        osd('');
+        el('panel').style.display = 'flex';
+        status(code ? 'The game ended with code ' + code + ' (see the browser console).<br>Reload the page to play again.'
+                    : 'The game has ended. Reload the page to play again.');
+        show(null);
+      });
+    }
+  };
+  window.addEventListener('error', function(e) {
+    if (Module.running) osd('Error: ' + e.message);
+  });
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>

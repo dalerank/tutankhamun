@@ -75,6 +75,21 @@ builds Release in `build/appimage` (or the given folder), installs it into an Ap
 AppImage needs a glibc at least as new as the one it was built with, so build it on the oldest distribution it should
 run on: the CI (`.github/workflows/tutankhamun_linux.yml`) builds on Ubuntu 22.04 (glibc 2.34).
 
+## The browser
+
+Emscripten's SDK (4.0.1, as the CI) and Ninja. In its environment (`emsdk_env.sh`, or `emsdk_env.ps1` on Windows):
+
+    emcmake cmake -S . -B out/build/web -G Ninja -DCMAKE_BUILD_TYPE=Release
+    cmake --build out/build/web
+
+writes `out/build/web/bin/tutankhamun.html` with its `.js` and `.wasm`. SDL2 and SDL2_mixer are Emscripten's own
+ports, the configs are built into the program, and there is no Discord presence. Serve the folder over http (a
+`file://` page cannot load the `.wasm`), for instance with `python -m http.server -d out/build/web/bin`, and open
+`tutankhamun.html`. The page (`res/web/shell.html`) asks once for the folder of the player's own game; its files are
+copied into the browser's IndexedDB, and the saves and `tutankhamun.ini` are written back there while the game runs.
+The CI (`.github/workflows/tutankhamun_web.yml`) puts `web_build.zip` (`index.html`, `.js`, `.wasm`) in the release
+`nightly`.
+
 ## Checking the configs
 
 `tutankhamun --check-configs config` loads every file of the `config` folder and compares it with the tables built
