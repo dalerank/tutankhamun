@@ -1,8 +1,13 @@
 # Tutankhamun
 
 [![Discord](res/badges/discord.svg)](https://discord.gg/HS4njmBvpb)
-
-**Play in the browser: [dalerank.github.io/tutankhamun/play](https://dalerank.github.io/tutankhamun/play/)** (with the files of your own copy of the game)
+[![Windows](res/badges/windows.svg)](https://nightly.link/dalerank/tutankhamun/workflows/tutankhamun_windows/main/windows_build.zip)
+[![Windows x64](res/badges/windows_x64.svg)](https://nightly.link/dalerank/tutankhamun/workflows/tutankhamun_windows/main/windows_build_x64.zip)
+[![Linux](res/badges/linux.svg)](https://nightly.link/dalerank/tutankhamun/workflows/tutankhamun_linux/main/linux_appimage.zip)
+[![Android](res/badges/android.svg)](https://nightly.link/dalerank/tutankhamun/workflows/tutankhamun_android/main/android_apk.zip)
+[![macOS arm64](res/badges/macos.svg)](https://nightly.link/dalerank/tutankhamun/workflows/tutankhamun_macos/main/macos_arm_build.zip)
+[![macOS x64](res/badges/macos_x64.svg)](https://nightly.link/dalerank/tutankhamun/workflows/tutankhamun_macos/main/macos_x64_build.zip)
+[![Play online](res/badges/web.svg)](https://dalerank.github.io/tutankhamun/play/)
 
 Tutankhamun is an open-source re-implementation of **Pharaoh + Cleopatra 2.1** (Impressions Games, 2000) in C: the
 game written again as a program of its own, `tutankhamun`, that plays on the files of your own copy of the game
