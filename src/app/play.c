@@ -45,6 +45,8 @@
 #include "window/display_resolution_list.h"
 #include "window/free_play.h"
 #include "window/window_proc.h"
+#include "widget/city_viewport.h"
+#include "widget/screen_layout.h"
 #include "widget/touch_construction.h"
 
 #if defined(_WIN32)
@@ -614,6 +616,7 @@ enum touch_state {
     TOUCH_PENDING = 1,
     TOUCH_DRAG = 2,
     TOUCH_DONE = 3,
+    TOUCH_PAN = 4,
 };
 
 enum touch_limits {
@@ -622,7 +625,13 @@ enum touch_limits {
 };
 
 enum android_screen {
-    ANDROID_SCREEN_HEIGHT = 720,
+    ANDROID_SCREEN_SCALE = 2,
+    ANDROID_SCREEN_MIN_HEIGHT = 480,
+    ANDROID_SCREEN_MIN_WIDTH = 640,
+    ANDROID_HEIGHT_SEARCH = 120,
+    ANDROID_ROW_STEP = VIEWPORT_TILE_HEIGHT / 2,
+    ANDROID_COLUMN_STEP = VIEWPORT_TILE_WIDTH + 2,
+    ANDROID_SIDEBAR_SPACE = SCREEN_LAYOUT_SIDEBAR_EXPANDED_WIDTH - 2,
 };
 
 enum text_field_area {
@@ -705,7 +714,20 @@ static struct {
     uint32_t down_ms;
     int32_t release_message;
     int32_t release_key;
+    int32_t can_pan;
+    int32_t pan_x;
+    int32_t pan_y;
 } touch;
+
+// the map follows the finger by whole steps; what is left of the move waits for the next one
+static void touch_pan(int32_t x, int32_t y)
+{
+    int32_t columns = (x - touch.pan_x) / TOUCH_MAP_PAN_COLUMN_PIXELS;
+    int32_t row_pairs = (y - touch.pan_y) / TOUCH_MAP_PAN_ROW_PAIR_PIXELS;
+    touch.pan_x += columns * TOUCH_MAP_PAN_COLUMN_PIXELS;
+    touch.pan_y += row_pairs * TOUCH_MAP_PAN_ROW_PAIR_PIXELS;
+    touch_map_pan(columns, row_pairs);
+}
 
 static void touch_left_down(int32_t x, int32_t y)
 {
@@ -758,6 +780,9 @@ static bool touch_event(const SDL_Event *e)
             touch.x = e->button.x;
             touch.y = e->button.y;
             touch.down_ms = SDL_GetTicks();
+            touch.can_pan = touch_map_pan_allowed(touch.x, touch.y);
+            touch.pan_x = touch.x;
+            touch.pan_y = touch.y;
             mouse_message(PLATFORM_MSG_MOUSE_MOVE, touch.x, touch.y);
             return true;
         case SDL_MOUSEMOTION:
@@ -765,8 +790,15 @@ static bool touch_event(const SDL_Event *e)
                 return false;
             }
             if (touch.state == TOUCH_PENDING && touch_moved_far(e->motion.x, e->motion.y)) {
-                touch.state = TOUCH_DRAG;
-                touch_left_down(touch.x, touch.y);
+                if (touch.can_pan) {
+                    touch.state = TOUCH_PAN;
+                } else {
+                    touch.state = TOUCH_DRAG;
+                    touch_left_down(touch.x, touch.y);
+                }
+            }
+            if (touch.state == TOUCH_PAN) {
+                touch_pan(e->motion.x, e->motion.y);
             }
             mouse_message(PLATFORM_MSG_MOUSE_MOVE, e->motion.x, e->motion.y);
             return true;
@@ -804,9 +836,34 @@ static void android_display_size(play_display_request *request)
     }
     int32_t long_side = desktop.w > desktop.h ? desktop.w : desktop.h;
     int32_t short_side = desktop.w > desktop.h ? desktop.h : desktop.w;
-    int32_t height = short_side < ANDROID_SCREEN_HEIGHT ? short_side : ANDROID_SCREEN_HEIGHT;
-    request->height = height;
-    request->width = ((height * long_side) / short_side) & ~1;
+    int32_t target = short_side / ANDROID_SCREEN_SCALE;
+    if (target < ANDROID_SCREEN_MIN_HEIGHT) {
+        target = short_side < ANDROID_SCREEN_MIN_HEIGHT ? short_side : ANDROID_SCREEN_MIN_HEIGHT;
+    }
+    request->height = target;
+    request->width = ((target * long_side) / short_side) & ~1;
+    // The city view takes whole tile columns and rows: a width of the sidebar plus whole columns and a height of
+    // whole rows leave no filler strips by the sidebar and only the thinnest black bar below the view. Among the
+    // heights a little under the target, the one whose width comes closest to the screen's shape is taken.
+    int32_t best_error = -1;
+    for (int32_t height = target - (target % ANDROID_ROW_STEP); height >= target - ANDROID_HEIGHT_SEARCH; height -= ANDROID_ROW_STEP) {
+        if (height < ANDROID_SCREEN_MIN_HEIGHT) {
+            break;
+        }
+        int32_t exact = (height * long_side) / short_side;
+        int32_t columns = (exact - ANDROID_SIDEBAR_SPACE + ANDROID_COLUMN_STEP / 2) / ANDROID_COLUMN_STEP;
+        int32_t width = ANDROID_SIDEBAR_SPACE + columns * ANDROID_COLUMN_STEP;
+        if (width < ANDROID_SCREEN_MIN_WIDTH) {
+            continue;
+        }
+        int32_t error = width * short_side - height * long_side;
+        error = error < 0 ? -error : error;
+        if (best_error < 0 || error < best_error) {
+            best_error = error;
+            request->width = width;
+            request->height = height;
+        }
+    }
 }
 #endif
 

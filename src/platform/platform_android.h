@@ -26,4 +26,7 @@ bool android_game_folder_set(const char *uri);
 bool android_game_folder_pick(bool again, char *uri, size_t size);
 const char *android_storage_path(void);
 
+// a POST of a JSON body through the Java side (HttpURLConnection), from any thread; the answer's status, 0 when none
+int32_t android_http_post_json(const char *url, const char *body, size_t size);
+
 #endif

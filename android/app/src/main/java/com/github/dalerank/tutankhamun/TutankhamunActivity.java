@@ -18,11 +18,14 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 
 public class TutankhamunActivity extends SDLActivity {
     private static final String TAG = "tutankhamun";
     private static final String CONFIG_ASSETS = "config";
     private static final int GET_FOLDER_RESULT = 500;
+    private static final int HTTP_TIMEOUT_MS = 15000;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -89,6 +92,42 @@ public class TutankhamunActivity extends SDLActivity {
             gotDirectory();
         } else {
             super.onActivityResult(requestCode, resultCode, data);
+        }
+    }
+
+    // a bug report's POST, from the game's report thread; the answer's status, 0 when there was none
+    @SuppressWarnings("unused")
+    public static int httpPostJson(String url, byte[] body) {
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(url).openConnection();
+            connection.setConnectTimeout(HTTP_TIMEOUT_MS);
+            connection.setReadTimeout(HTTP_TIMEOUT_MS * 4);
+            connection.setRequestMethod("POST");
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/json");
+            connection.setRequestProperty("User-Agent", "tutankhamun");
+            connection.setFixedLengthStreamingMode(body.length);
+            try (OutputStream out = connection.getOutputStream()) {
+                out.write(body);
+            }
+            int status = connection.getResponseCode();
+            try (InputStream in = status < 400 ? connection.getInputStream() : connection.getErrorStream()) {
+                if (in != null) {
+                    byte[] buffer = new byte[4096];
+                    while (in.read(buffer) > 0) {
+                        // the answer is not needed: read for the connection's reuse
+                    }
+                }
+            }
+            return status;
+        } catch (IOException e) {
+            Log.e(TAG, "the POST to " + url + " failed: " + e);
+            return 0;
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
         }
     }
 

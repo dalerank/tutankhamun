@@ -420,6 +420,19 @@ void city_view_scroll_direction(int32_t direction)
     city_view_check_camera_boundaries();
 }
 
+// a finger's drag on a touch screen: the camera moves by whole tile columns and by pairs of rows (the camera's row is
+// always even), the opposite way to the finger
+void city_view_pan(int32_t columns, int32_t row_pairs)
+{
+    if (columns == 0 && row_pairs == 0) {
+        return;
+    }
+    map_info.camera_x -= columns;
+    map_info.camera_y -= row_pairs * 2;
+    sound_city_decay_views();
+    city_view_check_camera_boundaries();
+}
+
 int32_t city_scroll_rate(void)
 {
     uint32_t now = platform_time_ms();

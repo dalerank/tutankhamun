@@ -19,6 +19,7 @@ int32_t city_view_pixels_to_grid_offset(int32_t x, int32_t y);
 void city_view_calculate_map_bounds(void);
 void city_view_mouse_select(void);
 void city_view_scroll_direction(int32_t direction);
+void city_view_pan(int32_t columns, int32_t row_pairs);
 int32_t city_scroll_rate(void);
 int32_t scroll_get_direction(void);
 void city_view_calculate_lookup(int32_t orientation);

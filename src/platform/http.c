@@ -147,6 +147,29 @@ int32_t http_post_json(const char *url, const char *body, size_t size, int32_t *
     return ok;
 }
 
+#elif defined(__ANDROID__)
+
+#include "platform/platform_android.h"
+
+int32_t http_supported(void)
+{
+    return 1;
+}
+
+int32_t http_get(const char *url, http_sink sink, void *context)
+{
+    (void) url;
+    (void) sink;
+    (void) context;
+    return 0;
+}
+
+int32_t http_post_json(const char *url, const char *body, size_t size, int32_t *status)
+{
+    *status = android_http_post_json(url, body, size);
+    return *status >= 200 && *status < 300;
+}
+
 #else
 
 int32_t http_supported(void)

@@ -214,6 +214,43 @@ const char *android_storage_path(void)
     return SDL_AndroidGetInternalStoragePath();
 }
 
+// The report's thread is not a Java one, and FindClass there sees only the system's classes: the activity's own class
+// is taken from the activity object instead.
+int32_t android_http_post_json(const char *url, const char *body, size_t size)
+{
+    JNIEnv *env = (JNIEnv *) SDL_AndroidGetJNIEnv();
+    jobject activity = env ? (jobject) SDL_AndroidGetActivity() : NULL;
+    if (!activity) {
+        SDL_Log("android: no JNI environment or activity for the HTTP request");
+        return 0;
+    }
+    int32_t status = 0;
+    jclass class = (*env)->GetObjectClass(env, activity);
+    jmethodID method = (*env)->GetStaticMethodID(env, class, "httpPostJson", "(Ljava/lang/String;[B)I");
+    if (method) {
+        jstring jurl = (*env)->NewStringUTF(env, url);
+        jbyteArray jbody = (*env)->NewByteArray(env, (jsize) size);
+        if (jurl && jbody) {
+            (*env)->SetByteArrayRegion(env, jbody, 0, (jsize) size, (const jbyte *) body);
+            status = (int32_t) (*env)->CallStaticIntMethod(env, class, method, jurl, jbody);
+        }
+        if (jurl) {
+            (*env)->DeleteLocalRef(env, jurl);
+        }
+        if (jbody) {
+            (*env)->DeleteLocalRef(env, jbody);
+        }
+    }
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionDescribe(env);
+        (*env)->ExceptionClear(env);
+        status = 0;
+    }
+    (*env)->DeleteLocalRef(env, class);
+    (*env)->DeleteLocalRef(env, activity);
+    return status;
+}
+
 JNIEXPORT void JNICALL Java_com_github_dalerank_tutankhamun_TutankhamunActivity_gotDirectory(JNIEnv *env, jobject self)
 {
     picker_answered = 1;

@@ -12,6 +12,9 @@
 #if defined(_WIN32) && !defined(__ANDROID__)
 #include <windows.h>
 #define REPORT_SUPPORTED 1
+#elif defined(__ANDROID__)
+#include "SDL.h"
+#define REPORT_SUPPORTED 1
 #endif
 
 enum report_limits {
@@ -232,7 +235,13 @@ int32_t report_supported(void)
 #endif
 }
 
-#if defined(REPORT_SUPPORTED)
+#if defined(__ANDROID__)
+static int report_thread(void *context)
+{
+    post_note((report_note *) context);
+    return 0;
+}
+#elif defined(REPORT_SUPPORTED)
 static DWORD WINAPI report_thread(LPVOID context)
 {
     post_note((report_note *) context);
@@ -252,7 +261,13 @@ int32_t report_send(const char *kind, const char *title, const char *text, uint8
         return 0;
     }
     state = REPORT_SENDING;
-#if defined(REPORT_SUPPORTED)
+#if defined(__ANDROID__)
+    SDL_Thread *thread = SDL_CreateThread(report_thread, "report", note);
+    if (thread) {
+        SDL_DetachThread(thread);
+        return 1;
+    }
+#elif defined(REPORT_SUPPORTED)
     HANDLE thread = CreateThread(0, 0, report_thread, note, 0, 0);
     if (thread) {
         CloseHandle(thread);
